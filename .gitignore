@@ -1,0 +1,49 @@
+# Binaries and executables
+*.exe
+vibe-echo
+vibemusic
+*.exe~
+
+# Sound fonts (large binary files)
+*.sf2
+*.sf3
+
+# Screenshots and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# Environment configuration (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Go module files - DO NOT ignore these
+# go.mod
+# go.sum
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Design docs & plans (not code)
+docs/
+
+# Worktrees
+.worktrees/
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
