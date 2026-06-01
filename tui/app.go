@@ -167,8 +167,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// This ensures compose mode responses aren't mistaken for new compose triggers
 			if m.composeMode {
 				fmt.Fprintf(os.Stderr, "[DEBUG] Processing compose input\n")
+				composeModeBefore := m.composeMode
 				m.processComposeInput(input)
 				m.editor.SetValue("")
+				// If composeMode was changed to false, force re-render
+				if composeModeBefore && !m.composeMode {
+					fmt.Fprintf(os.Stderr, "[DEBUG] Compose mode ended, forcing re-render\n")
+					return m, func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} }
+				}
 				return m, nil
 			}
 
@@ -482,6 +488,8 @@ func (m *AppModel) processComposeInput(input string) {
 			}
 			m.composeMode = false
 			m.agentStatus = "complete"
+			fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n", 
+				m.composeMode, len(m.codeContent))
 			return
 		}
 		// If in structure phase but not a valid selection, show error
@@ -535,6 +543,8 @@ func (m *AppModel) processComposeInput(input string) {
 
 		m.composeMode = false
 		m.agentStatus = "complete"
+		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n", 
+			m.composeMode, len(m.codeContent))
 		return
 	}
 
