@@ -243,9 +243,11 @@ func (m *AppModel) handleCommand(cmd string) {
 				filename = "song.dsl"
 			}
 			m.saveCurrentCode(filename)
-		}
-		// Check for /load <filename>
-		if strings.HasPrefix(strings.ToLower(cmd), "/load ") {
+		} else if strings.ToLower(cmd) == "/save" {
+			// /save without filename - use default
+			m.saveCurrentCode("song.dsl")
+		} else if strings.HasPrefix(strings.ToLower(cmd), "/load ") {
+			// /load <filename>
 			filename := strings.TrimPrefix(cmd, "/load ")
 			filename = strings.TrimSpace(filename)
 			if filename == "" {
@@ -253,6 +255,9 @@ func (m *AppModel) handleCommand(cmd string) {
 				return
 			}
 			m.loadAndPlayFile(filename)
+		} else if strings.ToLower(cmd) == "/load" {
+			// /load without filename - try default
+			m.loadAndPlayFile("song.dsl")
 		}
 	case "/help":
 		m.agentStatus = "help"
