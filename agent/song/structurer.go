@@ -227,58 +227,48 @@ func (s *Structurer) ParseCustomStructure(input string) ([]SectionType, error) {
 		return nil, fmt.Errorf("empty structure")
 	}
 	
-	// Mapping from Chinese/English names to SectionType
-	nameMap := map[string]SectionType{
-		"intro":      SectionIntro,
-		"引":         SectionIntro,
-		"引入":       SectionIntro,
-		"开场":       SectionIntro,
-		"verse":      SectionVerse,
-		"主歌":       SectionVerse,
-		"a段":        SectionVerse,
-		"pre":        SectionPreChorus,
-		"prechorus":  SectionPreChorus,
-		"预副歌":     SectionPreChorus,
-		"预设":       SectionPreChorus,
-		"chorus":     SectionChorus,
-		"副歌":       SectionChorus,
-		"b段":        SectionChorus,
-		"高潮":        SectionChorus,
-		"bridge":     SectionBridge,
-		"桥":         SectionBridge,
-		"桥段":       SectionBridge,
-		"c段":        SectionBridge,
-		"outro":      SectionOutro,
-		"尾":         SectionOutro,
-		"结尾":       SectionOutro,
-		"结束":       SectionOutro,
+	// Short names for matching (must be checked before longer names)
+	// Order matters: check "桥段" before "桥", "副歌" before "副" etc.
+	type matchRule struct {
+		keywords []string
+		section  SectionType
+	}
+	
+	rules := []matchRule{
+		{[]string{"outro", "结尾", "结束", "尾段"}, SectionOutro},
+		{[]string{"bridge", "桥段", "桥接", "桥"}, SectionBridge},
+		{[]string{"prechorus", "预副歌", "预设段", "前置"}, SectionPreChorus},
+		{[]string{"chorus", "副歌", "高潮", "副段"}, SectionChorus},
+		{[]string{"verse", "主歌", "a段", "主段"}, SectionVerse},
+		{[]string{"intro", "引子", "开场", "引入"}, SectionIntro},
 	}
 	
 	var result []SectionType
 	inputLower := strings.ToLower(input)
+	remaining := inputLower
+	maxIterations := 20 // prevent infinite loop
 	
-	// Try to find matches for each known section name
-	for name, sectionType := range nameMap {
-		if strings.Contains(inputLower, name) {
-			result = append(result, sectionType)
-		}
-	}
-	
-	// If no matches found, try to count occurrences and guess structure
-	if len(result) == 0 {
-		// Count Chinese characters
-		verseCount := strings.Count(inputLower, "主歌") + strings.Count(inputLower, "verse")
-		chorusCount := strings.Count(inputLower, "副歌") + strings.Count(inputLower, "chorus")
-		bridgeCount := strings.Count(inputLower, "桥") + strings.Count(inputLower, "bridge")
+	for len(remaining) > 0 && maxIterations > 0 {
+		maxIterations--
+		matched := false
 		
-		for i := 0; i < verseCount && i < 2; i++ {
-			result = append(result, SectionVerse)
+		for _, rule := range rules {
+			for _, kw := range rule.keywords {
+				if strings.HasPrefix(remaining, kw) || strings.HasPrefix(remaining, strings.ReplaceAll(kw, " ", "")) {
+					result = append(result, rule.section)
+					remaining = remaining[len(kw):]
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
 		}
-		for i := 0; i < chorusCount && i < 2; i++ {
-			result = append(result, SectionChorus)
-		}
-		if bridgeCount > 0 {
-			result = append(result, SectionBridge)
+		
+		if !matched {
+			// Skip one character and try again
+			remaining = remaining[1:]
 		}
 	}
 	
