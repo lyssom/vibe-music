@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/lyssom/vibe-music/core/audio"
 	"github.com/lyssom/vibe-music/core/pattern"
 	"github.com/lyssom/vibe-music/core/playback"
+	"github.com/lyssom/vibe-music/pkg/logger"
 )
 
 type AppModel struct {
@@ -149,6 +151,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runCode()
 		case "enter":
 			input := strings.TrimSpace(m.editor.Value())
+			fmt.Fprintf(os.Stderr, "[DEBUG] Enter: input=%q, composeMode=%v\n", input, m.composeMode)
 			if input == "" {
 				return m, nil
 			}
@@ -160,24 +163,28 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Auto-detect song composition mode based on keywords
-			if shouldStartComposeMode(input) {
-				m.startComposeModeWithPrompt(input)
-				m.editor.SetValue("")
-				return m, nil
-			}
-
-			// Process input based on current mode
+			// Process input based on current mode FIRST (before auto-detect)
+			// This ensures compose mode responses aren't mistaken for new compose triggers
 			if m.composeMode {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Processing compose input\n")
 				m.processComposeInput(input)
 				m.editor.SetValue("")
 				return m, nil
 			}
 
+			// Auto-detect song composition mode based on keywords
+			if shouldStartComposeMode(input) {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Starting compose mode\n")
+				m.startComposeModeWithPrompt(input)
+				m.editor.SetValue("")
+				return m, nil
+			}
+
+			fmt.Fprintf(os.Stderr, "[DEBUG] Running agent\n")
 			// Normal single-shot generation
 			_, cmd := m.runAgent(input)
 			m.editor.SetValue("")
-			return m, cmd
+				return m, cmd
 
 		case "ctrl+d":
 			m.editor.SetValue("")
@@ -395,34 +402,42 @@ func (m *AppModel) startComposeMode() {
 
 // startComposeModeWithPrompt starts composition with user's initial prompt
 func (m *AppModel) startComposeModeWithPrompt(prompt string) {
+	fmt.Fprintf(os.Stderr, "[DEBUG] startComposeModeWithPrompt: prompt=%q\n", prompt)
+	
 	if m.generator == nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] generator is nil!\n")
 		m.agentStatus = "no key"
 		return
 	}
+	
 	m.composer = song.NewComposer(m.generator)
 	m.composeMode = true
+	fmt.Fprintf(os.Stderr, "[DEBUG] composer created, composeMode=%v\n", m.composeMode)
 	
 	// Start session with the user's initial prompt
 	question := m.composer.StartSession(prompt)
+	fmt.Fprintf(os.Stderr, "[DEBUG] StartSession returned: Kind=%q, Text=%q\n", question.Kind, question.Text)
 	
 	// Store the AI's first question
 	m.currentQuestion = question.Text
 	
-	// Add AI's question to display
-	_ = question
-	
 	m.agentStatus = "composing"
+	fmt.Fprintf(os.Stderr, "[DEBUG] Composition mode started, currentQuestion=%q\n", m.currentQuestion)
 }
 
 // processComposeInput handles user input in composition mode
 func (m *AppModel) processComposeInput(input string) {
+	fmt.Fprintf(os.Stderr, "[DEBUG] processComposeInput called: input=%q, composeMode=%v\n", input, m.composeMode)
+	
 	// Check for command shortcuts
 	inputLower := strings.ToLower(input)
 	if inputLower == "/quit" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Quit command detected\n")
 		m.exitComposeMode()
 		return
 	}
 	if inputLower == "/back" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Back command detected\n")
 		if m.composer != nil {
 			if err := m.composer.Rollback(); err != nil {
 				m.errorMsg = err.Error()
@@ -433,10 +448,13 @@ func (m *AppModel) processComposeInput(input string) {
 
 	// Check if this is a structure selection (1, 2, or 3)
 	phase := m.composer.GetSessionState().CurrentPhase
+	fmt.Fprintf(os.Stderr, "[DEBUG] Current phase: %v\n", phase)
+	
 	if phase == song.PhaseStructure {
 		if input == "1" || input == "2" || input == "3" {
 			var idx int
 			fmt.Sscanf(input, "%d", &idx)
+			fmt.Fprintf(os.Stderr, "[DEBUG] Structure selection: index=%d\n", idx-1)
 			if err := m.composer.ProcessStructureSelection(idx - 1); err != nil {
 				m.errorMsg = err.Error()
 			}
@@ -445,7 +463,9 @@ func (m *AppModel) processComposeInput(input string) {
 
 	ctx := context.Background()
 	_, question, err := m.composer.ProcessResponse(ctx, input)
+	fmt.Fprintf(os.Stderr, "[DEBUG] ProcessResponse returned: question.Kind=%q, err=%v\n", question.Kind, err)
 	if err != nil {
+		logger.Error("[TUI] ProcessResponse error: %v", err)
 		m.errorMsg = err.Error()
 		return
 	}
@@ -457,6 +477,7 @@ func (m *AppModel) processComposeInput(input string) {
 
 	// Check if we should generate the song
 	if question.Kind == "done" || phase == song.PhaseGenerate {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Transitioning to generation phase\n")
 		// Generate the DSL code for all sections
 		m.agentStatus = "generating"
 		if err := m.composer.GenerateAllSections(ctx); err != nil {

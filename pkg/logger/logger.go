@@ -63,7 +63,7 @@ func Fatal(format string, args ...interface{}) {
 
 func getDefault() *Logger {
 	if defaultLogger == nil {
-		defaultLogger = New("app", INFO)
+		defaultLogger = New("app", DEBUG) // Use DEBUG level
 	}
 	return defaultLogger
 }
@@ -78,23 +78,41 @@ func SetPrefix(prefix string) {
 	getDefault().SetPrefix(prefix)
 }
 
-// New creates a new logger that writes to file only.
+// New creates a new logger. All loggers write to the same log file.
 func New(prefix string, level Level) *Logger {
 	logDir := os.Getenv("VIBE_LOG_DIR")
 	if logDir == "" {
 		logDir = os.TempDir()
 	}
+	
+	// Use same log file for all loggers (append mode)
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 	logFilePath = filepath.Join(logDir, fmt.Sprintf("vibe-echo_%s.log", timestamp))
 
-	file, err := os.Create(logFilePath)
-	if err != nil {
-		fmt.Printf("create log failed: %v\n", err)
+	var file *os.File
+	var err error
+	
+	if defaultLogger != nil && defaultLogger.file != nil {
+		// Reuse existing file from default logger
+		file = defaultLogger.file
+	} else {
+		file, err = os.Create(logFilePath)
+		if err != nil {
+			fmt.Printf("create log failed: %v\n", err)
+		}
+		// Set as default logger for global functions - use DEBUG level
+		if prefix == "main" {
+			defaultLogger = &Logger{
+				prefix: prefix,
+				level:  DEBUG, // Always use DEBUG level for main logger
+				file:   file,
+			}
+		}
 	}
 
 	return &Logger{
 		prefix: prefix,
-		level:  level,
+		level:  DEBUG, // Use DEBUG level for all loggers
 		file:   file,
 	}
 }
