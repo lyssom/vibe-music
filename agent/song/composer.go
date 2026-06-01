@@ -94,7 +94,7 @@ func (c *Composer) ProcessStructureSelection(index int) error {
 
 // parseAndSetElement extracts and sets element from response
 func (c *Composer) parseAndSetElement(response string) {
-	response = strings.ToLower(response)
+	responseLower := strings.ToLower(response)
 	state := c.session.GetState()
 	question := c.explorer.NextQuestion(len(state.History))
 	kind := question.Kind
@@ -105,7 +105,28 @@ func (c *Composer) parseAndSetElement(response string) {
 
 	// Try to match options first
 	for _, opt := range question.Options {
-		if strings.Contains(strings.ToLower(response), strings.ToLower(opt)) {
+		optLower := strings.ToLower(opt)
+		
+		// Check if response matches the option (either full match or partial)
+		// Strategy 1: exact match after lowercase
+		if responseLower == optLower {
+			c.session.SetElement(kind, opt)
+			return
+		}
+		
+		// Strategy 2: response contains the option (for "爵士" matching "爵士 Jazz")
+		// Extract the Chinese or first part of the option
+		if strings.Contains(optLower, " ") {
+			// Option has format "中文 English", extract Chinese part
+			chinesePart := strings.SplitN(optLower, " ", 2)[0]
+			if responseLower == chinesePart || strings.Contains(responseLower, chinesePart) {
+				c.session.SetElement(kind, opt)
+				return
+			}
+		}
+		
+		// Strategy 3: option contains response
+		if strings.Contains(optLower, responseLower) {
 			c.session.SetElement(kind, opt)
 			return
 		}
