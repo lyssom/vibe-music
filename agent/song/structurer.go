@@ -178,22 +178,166 @@ func (s *Structurer) ProposeStructures(count int) []StructureProposal {
 	return takeFirst(defaultStructures, count)
 }
 
-// SelectStructure selects a structure by index
+// SelectStructure selects a structure by index OR parses custom structure input
 func (s *Structurer) SelectStructure(index int) error {
 	proposals := s.session.GetProposedStructures()
-	if index < 0 || index >= len(proposals) {
-		return fmt.Errorf("invalid structure index: %d", index)
+	
+	// If index >= 0, use the proposal at that index
+	if index >= 0 && index < len(proposals) {
+		proposal := proposals[index]
+		var structure []SectionType
+		for _, cfg := range proposal.Sections {
+			structure = append(structure, cfg.Type)
+		}
+		s.session.SetStructure(structure)
+		s.session.SetPhase(PhaseGenerate)
+		return nil
 	}
-
-	proposal := proposals[index]
-	var structure []SectionType
-	for _, cfg := range proposal.Sections {
-		structure = append(structure, cfg.Type)
+	
+	// index == -1 means use the custom structure from elements
+	structureStr := s.session.GetElements().Structure
+	if structureStr == "" || structureStr == "由你推荐" {
+		// Use the first proposal
+		if len(proposals) > 0 {
+			proposal := proposals[0]
+			var structure []SectionType
+			for _, cfg := range proposal.Sections {
+				structure = append(structure, cfg.Type)
+			}
+			s.session.SetStructure(structure)
+			s.session.SetPhase(PhaseGenerate)
+			return nil
+		}
 	}
-
+	
+	// Parse custom structure like "主歌副歌主歌副歌桥副歌"
+	structure, err := s.ParseCustomStructure(structureStr)
+	if err != nil {
+		return fmt.Errorf("invalid structure: %v", err)
+	}
+	
 	s.session.SetStructure(structure)
 	s.session.SetPhase(PhaseGenerate)
 	return nil
+}
+
+// ParseCustomStructure parses a custom structure string like "主歌副歌主歌副歌桥副歌"
+func (s *Structurer) ParseCustomStructure(input string) ([]SectionType, error) {
+	if input == "" {
+		return nil, fmt.Errorf("empty structure")
+	}
+	
+	// Mapping from Chinese/English names to SectionType
+	nameMap := map[string]SectionType{
+		"intro":      SectionIntro,
+		"引":         SectionIntro,
+		"引入":       SectionIntro,
+		"开场":       SectionIntro,
+		"verse":      SectionVerse,
+		"主歌":       SectionVerse,
+		"a段":        SectionVerse,
+		"pre":        SectionPreChorus,
+		"prechorus":  SectionPreChorus,
+		"预副歌":     SectionPreChorus,
+		"预设":       SectionPreChorus,
+		"chorus":     SectionChorus,
+		"副歌":       SectionChorus,
+		"b段":        SectionChorus,
+		"高潮":        SectionChorus,
+		"bridge":     SectionBridge,
+		"桥":         SectionBridge,
+		"桥段":       SectionBridge,
+		"c段":        SectionBridge,
+		"outro":      SectionOutro,
+		"尾":         SectionOutro,
+		"结尾":       SectionOutro,
+		"结束":       SectionOutro,
+	}
+	
+	var result []SectionType
+	inputLower := strings.ToLower(input)
+	
+	// Try to find matches for each known section name
+	for name, sectionType := range nameMap {
+		if strings.Contains(inputLower, name) {
+			result = append(result, sectionType)
+		}
+	}
+	
+	// If no matches found, try to count occurrences and guess structure
+	if len(result) == 0 {
+		// Count Chinese characters
+		verseCount := strings.Count(inputLower, "主歌") + strings.Count(inputLower, "verse")
+		chorusCount := strings.Count(inputLower, "副歌") + strings.Count(inputLower, "chorus")
+		bridgeCount := strings.Count(inputLower, "桥") + strings.Count(inputLower, "bridge")
+		
+		for i := 0; i < verseCount && i < 2; i++ {
+			result = append(result, SectionVerse)
+		}
+		for i := 0; i < chorusCount && i < 2; i++ {
+			result = append(result, SectionChorus)
+		}
+		if bridgeCount > 0 {
+			result = append(result, SectionBridge)
+		}
+	}
+	
+	if len(result) == 0 {
+		return nil, fmt.Errorf("could not parse structure from: %s", input)
+	}
+	
+	return result, nil
+}
+
+// BuildProposalFromStructure creates a StructureProposal from a parsed structure
+func (s *Structurer) BuildProposalFromStructure(structure []SectionType, bpm int) StructureProposal {
+	// Count section types
+	sectionCounts := map[SectionType]int{}
+	for _, st := range structure {
+		sectionCounts[st]++
+	}
+	
+	// Determine bars per section type
+	barsMap := map[SectionType]int{
+		SectionIntro: 4,
+		SectionOutro: 4,
+		SectionPreChorus: 4,
+	}
+	
+	// Default bars based on section type
+	defaultBars := 8
+	for _, st := range structure {
+		if st == SectionIntro || st == SectionOutro {
+			defaultBars = 4
+			break
+		}
+	}
+	
+	// Build section configs
+	var sections []SectionConfig
+	totalBars := 0
+	idCounters := map[SectionType]int{}
+	
+	for _, st := range structure {
+		idCounters[st]++
+		bars := barsMap[st]
+		if bars == 0 {
+			bars = defaultBars
+		}
+		
+		sections = append(sections, SectionConfig{
+			Type: st,
+			Bars: bars,
+			Description: fmt.Sprintf("%s %d", sectionTypeName(st), idCounters[st]),
+		})
+		totalBars += bars
+	}
+	
+	return StructureProposal{
+		Name:      "自定义结构",
+		Sections:  sections,
+		TotalBars: totalBars,
+	}
 }
 
 // BuildSongFromStructure creates Song sections from structure

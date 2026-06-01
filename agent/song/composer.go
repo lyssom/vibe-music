@@ -96,35 +96,51 @@ func (c *Composer) ProcessResponse(ctx context.Context, response string) (*Dialo
 }
 
 // ProcessStructureSelection handles user's structure choice
+// index: -1 means use custom structure from elements
 func (c *Composer) ProcessStructureSelection(index int) error {
-	err := c.structurer.SelectStructure(index)
-	if err != nil {
-		return err
-	}
-	// Transition to generate phase
-	c.session.SetPhase(PhaseGenerate)
-	
-	// Build the song from the selected structure
+	proposals := c.session.GetProposedStructures()
 	elements := c.session.GetElements()
 	bpm := elements.BPM
 	if bpm == 0 {
 		bpm = 120
 	}
 	
-	proposals := c.session.GetProposedStructures()
 	var proposal StructureProposal
-	for _, p := range proposals {
-		if len(p.Sections) == len(c.session.GetSelectedStructure()) {
-			proposal = p
-			break
+	
+	if index >= 0 && index < len(proposals) {
+		// Use the proposal at the given index
+		proposal = proposals[index]
+	} else {
+		// Use custom structure or first proposal
+		structureStr := elements.Structure
+		if structureStr == "" || structureStr == "由你推荐" {
+			// Use first proposal
+			if len(proposals) > 0 {
+				proposal = proposals[0]
+			}
+		} else {
+			// Parse custom structure
+			structure, err := c.structurer.ParseCustomStructure(structureStr)
+			if err != nil {
+				// Fallback to first proposal
+				if len(proposals) > 0 {
+					proposal = proposals[0]
+				}
+			} else {
+				// Build proposal from custom structure
+				proposal = c.structurer.BuildProposalFromStructure(structure, bpm)
+			}
 		}
 	}
-	if proposal.Name == "" && len(proposals) > 0 {
-		proposal = proposals[0]
+	
+	if proposal.Name == "" {
+		return fmt.Errorf("no structure available")
 	}
 	
+	// Build the song from the proposal
 	song := c.structurer.BuildSongFromStructure("Untitled Song", proposal, bpm)
 	c.session.SetSong(song)
+	c.session.SetPhase(PhaseGenerate)
 	
 	return nil
 }

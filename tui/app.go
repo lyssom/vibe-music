@@ -466,35 +466,38 @@ func (m *AppModel) processComposeInput(input string) {
 				m.errorMsg = err.Error()
 				return
 			}
-			// After selection, directly trigger generation (don't call ProcessResponse)
-			fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation after structure selection\n")
-			m.agentStatus = "generating"
-			if err := m.composer.GenerateAllSections(ctx); err != nil {
+		} else {
+			// Custom structure - index -1 means use custom structure from elements
+			fmt.Fprintf(os.Stderr, "[DEBUG] Custom structure: %s\n", input)
+			if err := m.composer.ProcessStructureSelection(-1); err != nil {
 				m.errorMsg = err.Error()
 				return
 			}
-			// Combine all section codes
-			s := m.composer.GetSong()
-			if s != nil && len(s.Sections) > 0 {
-				var allCode strings.Builder
-				for i, section := range s.Sections {
-					if i > 0 {
-						allCode.WriteString("\n\n")
-					}
-					allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s", 
-						section.ID, section.Bars, section.DSLCode))
-				}
-				m.codeContent = allCode.String()
-			}
-			m.composeMode = false
-			m.agentStatus = "complete"
-			fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n", 
-				m.composeMode, len(m.codeContent))
+		}
+		// After selection, directly trigger generation (don't call ProcessResponse)
+		fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation after structure selection\n")
+		m.agentStatus = "generating"
+		if err := m.composer.GenerateAllSections(ctx); err != nil {
+			m.errorMsg = err.Error()
 			return
 		}
-		// If in structure phase but not a valid selection, show error
-		m.currentQuestion = "请选择 1、2 或 3"
-		m.agentStatus = "composing"
+		// Combine all section codes
+		s := m.composer.GetSong()
+		if s != nil && len(s.Sections) > 0 {
+			var allCode strings.Builder
+			for i, section := range s.Sections {
+				if i > 0 {
+					allCode.WriteString("\n\n")
+				}
+				allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s",
+					section.ID, section.Bars, section.DSLCode))
+			}
+			m.codeContent = allCode.String()
+		}
+		m.composeMode = false
+		m.agentStatus = "complete"
+		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n",
+			m.composeMode, len(m.codeContent))
 		return
 	}
 
