@@ -376,6 +376,7 @@ func (m AppModel) renderStatusLine(w int) string {
 	case "live": statusStr = accent.Render("LIVE")
 	case "paused": statusStr = orange.Render("PAUSED")
 	case "thinking": statusStr = pink.Render("THINKING")
+	case "generating": statusStr = pink.Render("GENERATING")
 	case "no key": statusStr = danger.Render("NO KEY")
 	case "composing": statusStr = cyan.Render("COMPOSING")
 	case "complete": statusStr = accent.Render("COMPLETE")
