@@ -1,5 +1,7 @@
 package song
 
+import "strings"
+
 // Explorer manages the ten elements exploration flow
 type Explorer struct {
 	session *Session
@@ -144,44 +146,19 @@ func (e *Explorer) IsComplete() bool {
 
 // DetermineMode determines interaction mode from initial prompt
 func DetermineMode(initialPrompt string) InteractionMode {
-	prompt := toLower(initialPrompt)
-
 	// Simple patterns
-	simplePatterns := []string{"beat", "loop", "pattern", "drum", "节奏", "循环"}
-	for _, p := range simplePatterns {
-		if contains(prompt, p) {
-			return ModeSimple
-		}
+	if strings.Contains(initialPrompt, "beat") || strings.Contains(initialPrompt, "loop") ||
+		strings.Contains(initialPrompt, "pattern") || strings.Contains(initialPrompt, "drum") ||
+		strings.Contains(initialPrompt, "节奏") || strings.Contains(initialPrompt, "循环") {
+		return ModeSimple
 	}
 
-	// Full patterns
-	fullPatterns := []string{"完整歌曲", "主歌", "副歌", "桥段", "album", "song", "track"}
-	for _, p := range fullPatterns {
-		if contains(prompt, p) {
-			return ModeFull
-		}
+	// Full patterns (song-related keywords)
+	if strings.Contains(initialPrompt, "song") || strings.Contains(initialPrompt, "主歌") ||
+		strings.Contains(initialPrompt, "副歌") || strings.Contains(initialPrompt, "桥段") ||
+		strings.Contains(initialPrompt, "album") || strings.Contains(initialPrompt, "track") {
+		return ModeFull
 	}
 
 	return ModeStandard
-}
-
-func toLower(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		result[i] = c
-	}
-	return string(result)
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

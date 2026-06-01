@@ -20,11 +20,11 @@ func NewSongGenerator(gen generator.Generator) *SongGenerator {
 }
 
 // GenerateSection generates DSL code for a specific section
-func (g *SongGenerator) GenerateSection(ctx context.Context, section Section, elements SongElements) (string, error) {
+func (g *SongGenerator) GenerateSection(ctx context.Context, section Section, elements SongElements, song *Song) (string, error) {
 	prompt := g.buildSectionPrompt(section, elements)
 
 	pctx := generator.PromptContext{
-		CurrentCode: g.getRelevantContext(section),
+		CurrentCode: g.getRelevantContext(section, song),
 	}
 
 	code, err := g.gen.Generate(ctx, prompt, pctx)
@@ -89,17 +89,38 @@ func (g *SongGenerator) getSectionDescription(section Section) string {
 }
 
 // getRelevantContext returns context from previous sections
-func (g *SongGenerator) getRelevantContext(section Section) string {
-	song := section.Elements.Genre // This is a placeholder - in real impl, get from song
-	_ = song
-	return ""
+func (g *SongGenerator) getRelevantContext(section Section, song *Song) string {
+	if song == nil {
+		return ""
+	}
+	
+	var sb strings.Builder
+	foundCurrent := false
+	
+	for _, s := range song.Sections {
+		if s.ID == section.ID {
+			foundCurrent = true
+			continue
+		}
+		if !foundCurrent && s.DSLCode != "" {
+			// Only include previous sections
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(fmt.Sprintf("// %s:\n%s", s.ID, s.DSLCode))
+		}
+	}
+	
+	return sb.String()
 }
 
 // GenerateSectionStream streams DSL code for a section
-func (g *SongGenerator) GenerateSectionStream(ctx context.Context, section Section, elements SongElements) (<-chan llm.StreamEvent, error) {
+func (g *SongGenerator) GenerateSectionStream(ctx context.Context, section Section, elements SongElements, song *Song) (<-chan llm.StreamEvent, error) {
 	prompt := g.buildSectionPrompt(section, elements)
 
-	pctx := generator.PromptContext{}
+	pctx := generator.PromptContext{
+		CurrentCode: g.getRelevantContext(section, song),
+	}
 
 	return g.gen.GenerateStream(ctx, prompt, pctx)
 }

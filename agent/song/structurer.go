@@ -1,6 +1,10 @@
 package song
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Structurer handles song structure proposals
 type Structurer struct {
@@ -149,7 +153,7 @@ var defaultStructures = []StructureProposal{
 // ProposeStructures returns structure proposals based on genre
 func (s *Structurer) ProposeStructures(count int) []StructureProposal {
 	genre := s.session.GetElements().Genre
-	genreLower := toLower(genre)
+	genreLower := strings.ToLower(genre)
 
 	// Find matching templates
 	var templates []StructureProposal
@@ -161,7 +165,7 @@ func (s *Structurer) ProposeStructures(count int) []StructureProposal {
 
 	// Partial match
 	for key, vals := range structureTemplates {
-		if contains(genreLower, key) || contains(key, genreLower) {
+		if strings.Contains(genreLower, key) || strings.Contains(key, genreLower) {
 			templates = append(templates, vals...)
 		}
 	}
@@ -176,9 +180,9 @@ func (s *Structurer) ProposeStructures(count int) []StructureProposal {
 
 // SelectStructure selects a structure by index
 func (s *Structurer) SelectStructure(index int) error {
-	proposals := s.session.GetState().ProposedStructures
+	proposals := s.session.GetProposedStructures()
 	if index < 0 || index >= len(proposals) {
-		return nil // User chose custom
+		return fmt.Errorf("invalid structure index: %d", index)
 	}
 
 	proposal := proposals[index]
@@ -260,21 +264,10 @@ func formatIntImpl(n int) string {
 	return formatIntImpl(n/10) + string(rune('0'+n%10))
 }
 
-func estimateDuration(bars, bpm int) Duration {
+func estimateDuration(bars, bpm int) int {
 	beats := bars * 4
 	seconds := float64(beats) * 60.0 / float64(bpm)
-	return Duration(seconds)
-}
-
-// Duration is a simple duration type
-type Duration float64
-
-func (d Duration) Minutes() int {
-	return int(d / 60)
-}
-
-func (d Duration) Seconds() int {
-	return int(d) % 60
+	return int(seconds)
 }
 
 func takeFirst(slice []StructureProposal, n int) []StructureProposal {

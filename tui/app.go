@@ -350,20 +350,51 @@ func (m *AppModel) processComposeInput(input string) {
 		return
 	}
 
-	turn, question, err := m.composer.ProcessResponse(input)
+	// Check if this is a structure selection (1, 2, or 3)
+	phase := m.composer.GetSessionState().CurrentPhase
+	if phase == song.PhaseStructure {
+		if input == "1" || input == "2" || input == "3" {
+			var idx int
+			fmt.Sscanf(input, "%d", &idx)
+			if err := m.composer.ProcessStructureSelection(idx - 1); err != nil {
+				m.errorMsg = err.Error()
+			}
+			// Continue to handle generation phase
+		}
+	}
+
+	ctx := context.Background()
+	turn, question, err := m.composer.ProcessResponse(ctx, input)
 	if err != nil {
 		m.errorMsg = err.Error()
 		return
 	}
 
 	// Add assistant turn to history
-	if turn != nil && turn.Role == "assistant" {
-		m.composer.GetDialogHistory() // ensure history is updated
-	}
+	_ = turn // consumed by ProcessResponse
 
-	if question.Kind == "done" {
-		// Generation complete
-		m.codeContent = m.composer.GetSong().Sections[0].DSLCode
+	if question.Kind == "done" || phase == song.PhaseGenerate {
+		// Now generate the DSL code for all sections
+		m.agentStatus = "generating"
+		if err := m.composer.GenerateAllSections(ctx); err != nil {
+			m.errorMsg = err.Error()
+			return
+		}
+
+		// Copy first section DSL to code content
+		song := m.composer.GetSong()
+		if song != nil && len(song.Sections) > 0 {
+			// Combine all section codes
+			var allCode strings.Builder
+			for i, section := range song.Sections {
+				if i > 0 {
+					allCode.WriteString("\n\n")
+				}
+				allCode.WriteString(fmt.Sprintf("// === %s ===\n%s", section.ID, section.DSLCode))
+			}
+			m.codeContent = allCode.String()
+		}
+
 		m.composeMode = false
 		m.agentStatus = "complete"
 		return

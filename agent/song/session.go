@@ -97,10 +97,10 @@ func (s *Session) RollbackTo(nodeIndex int) error {
 
 // RollbackLast reverts to the previous checkpoint
 func (s *Session) RollbackLast() error {
-	if s.state.CurrentNode < 0 {
+	if s.state.CurrentNode <= 0 {
 		return fmt.Errorf("no history to rollback")
 	}
-	return s.RollbackTo(s.state.CurrentNode)
+	return s.RollbackTo(s.state.CurrentNode - 1)
 }
 
 // GetHistoryNodes returns all history nodes for UI
@@ -126,6 +126,21 @@ func (s *Session) GetSong() *Song {
 // SetStructure sets the selected structure
 func (s *Session) SetStructure(structure []SectionType) {
 	s.state.SelectedStructure = structure
+}
+
+// GetSelectedStructure returns the selected structure
+func (s *Session) GetSelectedStructure() []SectionType {
+	return s.state.SelectedStructure
+}
+
+// GetProposedStructures returns the proposed structures
+func (s *Session) GetProposedStructures() []StructureProposal {
+	return s.state.ProposedStructures
+}
+
+// SetProposedStructures sets the proposed structures
+func (s *Session) SetProposedStructures(proposals []StructureProposal) {
+	s.state.ProposedStructures = proposals
 }
 
 // parseBPM converts string to BPM

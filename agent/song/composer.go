@@ -47,7 +47,7 @@ func (c *Composer) StartSession(initialPrompt string) Question {
 }
 
 // ProcessResponse handles user response to a question
-func (c *Composer) ProcessResponse(response string) (*DialogTurn, Question, error) {
+func (c *Composer) ProcessResponse(ctx context.Context, response string) (*DialogTurn, Question, error) {
 	c.session.AddDialogTurn("user", response)
 
 	// Parse response and update elements
@@ -72,13 +72,18 @@ func (c *Composer) ProcessResponse(response string) (*DialogTurn, Question, erro
 		return c.handleStructurePhase()
 
 	case PhaseGenerate, PhaseRefine:
-		return c.handleGeneratePhase()
+		return c.handleGeneratePhase(ctx)
 
 	case PhaseComplete:
 		return nil, Question{Kind: "done", Text: "创作完成！"}, nil
 	}
 
 	return nil, Question{Kind: "error", Text: "Unknown phase"}, nil
+}
+
+// ProcessStructureSelection handles user's structure choice
+func (c *Composer) ProcessStructureSelection(index int) error {
+	return c.structurer.SelectStructure(index)
 }
 
 // parseAndSetElement extracts and sets element from response
@@ -107,7 +112,7 @@ func (c *Composer) parseAndSetElement(response string) {
 // handleStructurePhase handles structure negotiation
 func (c *Composer) handleStructurePhase() (*DialogTurn, Question, error) {
 	proposals := c.structurer.ProposeStructures(3)
-	c.session.state.ProposedStructures = proposals
+	c.session.SetProposedStructures(proposals)
 
 	var sb strings.Builder
 	sb.WriteString("根据你的音乐偏好，我推荐以下歌曲结构：\n\n")
@@ -131,20 +136,35 @@ func (c *Composer) handleStructurePhase() (*DialogTurn, Question, error) {
 }
 
 // handleGeneratePhase handles song generation
-func (c *Composer) handleGeneratePhase() (*DialogTurn, Question, error) {
+func (c *Composer) handleGeneratePhase(ctx context.Context) (*DialogTurn, Question, error) {
 	elements := c.session.GetElements()
 	bpm := elements.BPM
 	if bpm == 0 {
 		bpm = 120
 	}
 
-	// Get selected structure proposal or use first
-	proposals := c.session.state.ProposedStructures
+	// Get selected structure or use first proposal
+	structure := c.session.GetSelectedStructure()
 	var proposal StructureProposal
-	if len(proposals) > 0 {
-		proposal = proposals[0]
-	} else {
-		proposal = defaultStructures[0]
+	
+	if len(structure) > 0 {
+		// Build proposal from selected structure
+		proposals := c.session.GetProposedStructures()
+		for _, p := range proposals {
+			if len(p.Sections) == len(structure) {
+				proposal = p
+				break
+			}
+		}
+	}
+	
+	if proposal.Name == "" {
+		proposals := c.session.GetProposedStructures()
+		if len(proposals) > 0 {
+			proposal = proposals[0]
+		} else {
+			proposal = defaultStructures[0]
+		}
 	}
 
 	song := c.structurer.BuildSongFromStructure("Untitled Song", proposal, bpm)
@@ -154,10 +174,11 @@ func (c *Composer) handleGeneratePhase() (*DialogTurn, Question, error) {
 	desc := c.generateSongDescription(song, elements)
 	song.Description = desc
 
+	// Return early - actual DSL generation happens in GenerateAllSections
 	return c.buildAssistantTurn(Question{
-		Kind:    "generating",
-		Text:    fmt.Sprintf("正在生成歌曲「%s」...", song.Title),
-	}), Question{Kind: "done", Text: "歌曲生成完成！"}, nil
+		Kind: "generating",
+		Text: fmt.Sprintf("正在生成歌曲「%s」，共 %d 个段落...", song.Title, len(song.Sections)),
+	}), Question{Kind: "generating", Text: "歌曲结构已创建。"}, nil
 }
 
 // generateSongDescription creates a text description of the song
@@ -195,7 +216,7 @@ func (c *Composer) GenerateAllSections(ctx context.Context) error {
 	}
 
 	for i := range song.Sections {
-		code, err := c.gen.GenerateSection(ctx, song.Sections[i], c.session.GetElements())
+		code, err := c.gen.GenerateSection(ctx, song.Sections[i], c.session.GetElements(), song)
 		if err != nil {
 			return err
 		}
@@ -227,16 +248,8 @@ func (c *Composer) RefineSection(ctx context.Context, sectionID string, instruct
 		return fmt.Errorf("section not found: %s", sectionID)
 	}
 
-	prompt := fmt.Sprintf(`Modify the following DSL code based on this instruction: %s
-
-Original code:
-%s
-
-Requirements:
-- Return ONLY the modified DSL code
-- Keep the same section type and duration`, instruction, section.DSLCode)
-
-	newCode, err := c.gen.gen.Generate(ctx, prompt, generator.PromptContext{})
+	// Generate modified code using the song generator
+	newCode, err := c.gen.GenerateSection(ctx, *section, c.session.GetElements(), song)
 	if err != nil {
 		return err
 	}
