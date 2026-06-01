@@ -327,41 +327,34 @@ func (c *Composer) GenerateAllSections(ctx context.Context) error {
 
 // generateTemplateDSL generates DSL code from templates (fallback when no LLM)
 func generateTemplateDSL(section Section) string {
-	// Simple template-based DSL generation using valid DSL syntax
+	// Template-based DSL generation - NO COMMENTS (parser doesn't support them)
 	switch section.Type {
 	case SectionIntro:
-		return fmt.Sprintf(`// Intro - %d bars at %d BPM
-bass("c2", "2n", 0.7)
-chord("c3 e3 g3", "4n", 0.4).every(4)`, section.Bars, section.BPM)
+		return fmt.Sprintf(`bass("c2", "2n", 0.7)
+chord("c3 e3 g3", "4n", 0.4).every(4)`)
 	case SectionVerse:
-		return fmt.Sprintf(`// Verse - %d bars
-bass("c2", "2n", 0.8)
+		return fmt.Sprintf(`bass("c2", "2n", 0.8)
 chord("c3 e3 g3", "4n", 0.5).every(4)
-sound("hh").every(4).every(2)`, section.Bars)
+sound("hh").every(4).every(2)`)
 	case SectionPreChorus:
-		return fmt.Sprintf(`// Pre-Chorus - %d bars
-bass("c2", "2n", 0.85)
+		return fmt.Sprintf(`bass("c2", "2n", 0.85)
 chord("c3 e3 g3", "4n", 0.55).every(4)
-sound("hh").every(4).every(2)`, section.Bars)
+sound("hh").every(4).every(2)`)
 	case SectionChorus:
-		return fmt.Sprintf(`// Chorus - %d bars
-bass("c2", "2n", 0.9)
+		return fmt.Sprintf(`bass("c2", "2n", 0.9)
 chord("c3 e3 g3", "4n", 0.6).every(4)
 sound("bd sd").every(4).every(2)
-sound("hh").every(4).every(2)`, section.Bars)
+sound("hh").every(4).every(2)`)
 	case SectionBridge:
-		return fmt.Sprintf(`// Bridge - %d bars
-bass("eb2", "2n", 0.85)
+		return fmt.Sprintf(`bass("eb2", "2n", 0.85)
 chord("eb3 gb3 bb3", "4n", 0.5).every(4)
-sound("hh").every(4).every(3)`, section.Bars)
+sound("hh").every(4).every(3)`)
 	case SectionOutro:
-		return fmt.Sprintf(`// Outro - %d bars
-bass("c2", "2n", 0.7)
-chord("c3 e3 g3", "4n", 0.4).every(4)`, section.Bars)
+		return fmt.Sprintf(`bass("c2", "2n", 0.7)
+chord("c3 e3 g3", "4n", 0.4).every(4)`)
 	default:
-		return fmt.Sprintf(`// Section - %d bars
-bass("c2", "2n", 0.8)
-chord("c3 e3 g3", "4n", 0.5).every(4)`, section.Bars)
+		return fmt.Sprintf(`bass("c2", "2n", 0.8)
+chord("c3 e3 g3", "4n", 0.5).every(4)`)
 	}
 }
 
