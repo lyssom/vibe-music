@@ -446,10 +446,11 @@ func (m *AppModel) processComposeInput(input string) {
 		return
 	}
 
-	// Check if this is a structure selection (1, 2, or 3)
+	ctx := context.Background()
 	phase := m.composer.GetSessionState().CurrentPhase
 	fmt.Fprintf(os.Stderr, "[DEBUG] Current phase: %v\n", phase)
 	
+	// Handle structure selection separately - don't call ProcessResponse
 	if phase == song.PhaseStructure {
 		if input == "1" || input == "2" || input == "3" {
 			var idx int
@@ -457,11 +458,39 @@ func (m *AppModel) processComposeInput(input string) {
 			fmt.Fprintf(os.Stderr, "[DEBUG] Structure selection: index=%d\n", idx-1)
 			if err := m.composer.ProcessStructureSelection(idx - 1); err != nil {
 				m.errorMsg = err.Error()
+				return
 			}
+			// After selection, directly trigger generation (don't call ProcessResponse)
+			fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation after structure selection\n")
+			m.agentStatus = "generating"
+			if err := m.composer.GenerateAllSections(ctx); err != nil {
+				m.errorMsg = err.Error()
+				return
+			}
+			// Combine all section codes
+			s := m.composer.GetSong()
+			if s != nil && len(s.Sections) > 0 {
+				var allCode strings.Builder
+				for i, section := range s.Sections {
+					if i > 0 {
+						allCode.WriteString("\n\n")
+					}
+					allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s", 
+						section.ID, section.Bars, section.DSLCode))
+				}
+				m.codeContent = allCode.String()
+			}
+			m.composeMode = false
+			m.agentStatus = "complete"
+			return
 		}
+		// If in structure phase but not a valid selection, show error
+		m.currentQuestion = "请选择 1、2 或 3"
+		m.agentStatus = "composing"
+		return
 	}
 
-	ctx := context.Background()
+	// Normal flow: ProcessResponse for explore/generate phases
 	_, question, err := m.composer.ProcessResponse(ctx, input)
 	fmt.Fprintf(os.Stderr, "[DEBUG] ProcessResponse returned: question.Kind=%q, err=%v\n", question.Kind, err)
 	if err != nil {
@@ -470,14 +499,19 @@ func (m *AppModel) processComposeInput(input string) {
 		return
 	}
 
+	// Get current phase AFTER ProcessResponse
+	currentPhase := m.composer.GetSessionState().CurrentPhase
+	fmt.Fprintf(os.Stderr, "[DEBUG] Current phase after ProcessResponse: %v\n", currentPhase)
+
 	// Store the AI's next question
 	if question.Text != "" && question.Kind != "done" {
 		m.currentQuestion = question.Text
 	}
 
 	// Check if we should generate the song
-	if question.Kind == "done" || phase == song.PhaseGenerate {
-		fmt.Fprintf(os.Stderr, "[DEBUG] Transitioning to generation phase\n")
+	// Generate if: question is done OR we're in generate phase
+	if question.Kind == "done" || question.Kind == "generating" || currentPhase == song.PhaseGenerate {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation\n")
 		// Generate the DSL code for all sections
 		m.agentStatus = "generating"
 		if err := m.composer.GenerateAllSections(ctx); err != nil {

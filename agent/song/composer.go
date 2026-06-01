@@ -103,6 +103,29 @@ func (c *Composer) ProcessStructureSelection(index int) error {
 	}
 	// Transition to generate phase
 	c.session.SetPhase(PhaseGenerate)
+	
+	// Build the song from the selected structure
+	elements := c.session.GetElements()
+	bpm := elements.BPM
+	if bpm == 0 {
+		bpm = 120
+	}
+	
+	proposals := c.session.GetProposedStructures()
+	var proposal StructureProposal
+	for _, p := range proposals {
+		if len(p.Sections) == len(c.session.GetSelectedStructure()) {
+			proposal = p
+			break
+		}
+	}
+	if proposal.Name == "" && len(proposals) > 0 {
+		proposal = proposals[0]
+	}
+	
+	song := c.structurer.BuildSongFromStructure("Untitled Song", proposal, bpm)
+	c.session.SetSong(song)
+	
 	return nil
 }
 
@@ -260,18 +283,79 @@ func (c *Composer) GenerateAllSections(ctx context.Context) error {
 		return fmt.Errorf("no song to generate")
 	}
 
-	for i := range song.Sections {
-		code, err := c.gen.GenerateSection(ctx, song.Sections[i], c.session.GetElements(), song)
-		if err != nil {
-			return err
+	// Check if the internal generator is available
+	// c.gen is *SongGenerator, c.gen.gen is generator.Generator
+	hasGenerator := c.gen != nil && c.gen.gen != nil
+	
+	if !hasGenerator {
+		// No LLM generator available, use template-based generation
+		fmt.Println("[Composer] No LLM generator, using template fallback")
+		for i := range song.Sections {
+			song.Sections[i].DSLCode = generateTemplateDSL(song.Sections[i])
 		}
-		song.Sections[i].DSLCode = code
+	} else {
+		for i := range song.Sections {
+			code, err := c.gen.GenerateSection(ctx, song.Sections[i], c.session.GetElements(), song)
+			if err != nil {
+				return err
+			}
+			song.Sections[i].DSLCode = code
+		}
 	}
 
 	c.session.SetSong(song)
 	c.session.SetPhase(PhaseComplete)
 	c.session.SaveHistoryNode()
 	return nil
+}
+
+// generateTemplateDSL generates DSL code from templates (fallback when no LLM)
+func generateTemplateDSL(section Section) string {
+	// Simple template-based DSL generation
+	switch section.Type {
+	case SectionIntro:
+		return fmt.Sprintf(`@%d BPM
+
+// Intro - %d bars
+[Intro]
+D4 0.5
+G4 0.5
+A4 0.5
+|`, section.BPM, section.Bars)
+	case SectionVerse:
+		return fmt.Sprintf(`// Verse - %d bars
+[Verse]
+Am 1
+Dm 1
+G 1
+C 1
+|`, section.Bars)
+	case SectionChorus:
+		return fmt.Sprintf(`// Chorus - %d bars
+[Chorus]
+C 1
+G 1
+Am 1
+F 1
+|`, section.Bars)
+	case SectionBridge:
+		return fmt.Sprintf(`// Bridge - %d bars
+[Bridge]
+Em 1
+Hm 1
+Am 1
+G 1
+|`, section.Bars)
+	case SectionOutro:
+		return fmt.Sprintf(`// Outro - %d bars
+[Outro]
+D4 1
+G4 1
+|`, section.Bars)
+	default:
+		return fmt.Sprintf(`// Section - %d bars
+|`, section.Bars)
+	}
 }
 
 // RefineSection modifies a specific section
