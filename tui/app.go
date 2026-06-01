@@ -232,10 +232,87 @@ func (m *AppModel) handleCommand(cmd string) {
 				m.errorMsg = err.Error()
 			}
 		}
+	case "/save":
+		m.saveCurrentCode("song.dsl")
+	default:
+		// Check for /save <filename>
+		if strings.HasPrefix(strings.ToLower(cmd), "/save ") {
+			filename := strings.TrimPrefix(cmd, "/save ")
+			filename = strings.TrimSpace(filename)
+			if filename == "" {
+				filename = "song.dsl"
+			}
+			m.saveCurrentCode(filename)
+		}
+		// Check for /load <filename>
+		if strings.HasPrefix(strings.ToLower(cmd), "/load ") {
+			filename := strings.TrimPrefix(cmd, "/load ")
+			filename = strings.TrimSpace(filename)
+			if filename == "" {
+				m.errorMsg = "用法: /load <filename>"
+				return
+			}
+			m.loadAndPlayFile(filename)
+		}
 	case "/help":
 		m.agentStatus = "help"
-		m.errorMsg = "/compose - 开启多轮歌曲创作  /quit - 退出创作  /back - 回退一步"
+		m.errorMsg = "/compose - 开启创作  /quit - 退出  /back - 回退  /save [file] - 保存  /load [file] - 加载"
 	}
+}
+
+// saveCurrentCode saves the current code content to a file
+func (m *AppModel) saveCurrentCode(filename string) {
+	if m.codeContent == "" {
+		m.errorMsg = "没有可保存的代码"
+		return
+	}
+	
+	// Strip comments from DSL code (parser doesn't support them)
+	var cleanCode strings.Builder
+	lines := strings.Split(m.codeContent, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "//") {
+			cleanCode.WriteString(line)
+			cleanCode.WriteString("\n")
+		}
+	}
+	
+	err := os.WriteFile(filename, []byte(strings.TrimSpace(cleanCode.String())), 0644)
+	if err != nil {
+		m.errorMsg = fmt.Sprintf("保存失败: %v", err)
+		return
+	}
+	
+	m.agentStatus = "complete"
+	m.errorMsg = fmt.Sprintf("已保存到: %s", filename)
+}
+
+// loadAndPlayFile loads a DSL file and plays it
+func (m *AppModel) loadAndPlayFile(filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		m.errorMsg = fmt.Sprintf("加载失败: %v", err)
+		return
+	}
+	
+	code := strings.TrimSpace(string(data))
+	if code == "" {
+		m.errorMsg = "文件为空"
+		return
+	}
+	
+	ast, err := pattern.Parse(code)
+	if err != nil {
+		m.errorMsg = fmt.Sprintf("解析失败: %v", err)
+		return
+	}
+	
+	m.codeContent = code
+	m.errorMsg = ""
+	m.playback.LoadAST(ast, m.bpm)
+	m.playback.Start()
+	m.playing, m.agentStatus, m.beat = true, "live", 0
 }
 
 func (m *AppModel) togglePlay() {
