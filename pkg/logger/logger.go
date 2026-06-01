@@ -2,10 +2,8 @@ package logger
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -38,6 +36,7 @@ type Logger struct {
 // Default logger instance
 var defaultLogger *Logger
 var logFilePath string
+var initOnce sync.Once
 
 // Global logging functions
 func Debug(format string, args ...interface{}) {
@@ -62,9 +61,34 @@ func Fatal(format string, args ...interface{}) {
 }
 
 func getDefault() *Logger {
-	if defaultLogger == nil {
-		defaultLogger = New("app", DEBUG) // Use DEBUG level
-	}
+	initOnce.Do(func() {
+		// Default to current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = os.TempDir()
+		}
+		
+		logDir := os.Getenv("VIBE_LOG_DIR")
+		if logDir == "" {
+			logDir = cwd
+		}
+		
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		logFilePath = filepath.Join(logDir, fmt.Sprintf("vibe-echo_%s.log", timestamp))
+		
+		file, err := os.Create(logFilePath)
+		if err != nil {
+			fmt.Printf("[LOGGER] create log file failed: %v\n", err)
+		}
+		
+		defaultLogger = &Logger{
+			prefix: "main",
+			level:  DEBUG,
+			file:   file,
+		}
+		
+		fmt.Printf("[LOGGER] Log file: %s\n", logFilePath)
+	})
 	return defaultLogger
 }
 
@@ -80,41 +104,11 @@ func SetPrefix(prefix string) {
 
 // New creates a new logger. All loggers write to the same log file.
 func New(prefix string, level Level) *Logger {
-	logDir := os.Getenv("VIBE_LOG_DIR")
-	if logDir == "" {
-		logDir = os.TempDir()
-	}
-	
-	// Use same log file for all loggers (append mode)
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	logFilePath = filepath.Join(logDir, fmt.Sprintf("vibe-echo_%s.log", timestamp))
-
-	var file *os.File
-	var err error
-	
-	if defaultLogger != nil && defaultLogger.file != nil {
-		// Reuse existing file from default logger
-		file = defaultLogger.file
-	} else {
-		file, err = os.Create(logFilePath)
-		if err != nil {
-			fmt.Printf("create log failed: %v\n", err)
-		}
-		// Set as default logger for global functions - use DEBUG level
-		if prefix == "main" {
-			defaultLogger = &Logger{
-				prefix: prefix,
-				level:  DEBUG, // Always use DEBUG level for main logger
-				file:   file,
-			}
-		}
-	}
-
-	return &Logger{
-		prefix: prefix,
-		level:  DEBUG, // Use DEBUG level for all loggers
-		file:   file,
-	}
+	// Ensure default logger is initialized
+	l := getDefault()
+	l.prefix = prefix
+	l.level = level
+	return l
 }
 
 // GetLogFilePath returns the current log file path.
@@ -144,12 +138,22 @@ func (l *Logger) log(level Level, format string, args ...interface{}) {
 
 	ts := time.Now().Format("15:04:05.000")
 	msg := fmt.Sprintf(format, args...)
-
-	// Write to file only (no console output)
-	fileLine := fmt.Sprintf("%s[%s] %s: %s", l.prefix, ts, levelNames[level], msg)
-	if l.file != nil {
-		io.WriteString(l.file, fileLine+"\n")
+	
+	prefix := l.prefix
+	if prefix == "" {
+		prefix = "app"
 	}
+
+	logLine := fmt.Sprintf("%s[%s] %s: %s", ts, prefix, levelNames[level], msg)
+	
+	// Write to file
+	if l.file != nil {
+		fmt.Fprintln(l.file, logLine)
+		l.file.Sync() // Ensure write is flushed
+	}
+	
+	// Also print to stderr for real-time viewing
+	fmt.Fprintln(os.Stderr, logLine)
 }
 
 func (l *Logger) Debug(format string, args ...interface{}) {
@@ -174,24 +178,20 @@ func (l *Logger) Close() {
 	defer l.mu.Unlock()
 	if l.file != nil {
 		l.file.Close()
+		l.file = nil
 	}
 }
 
-// DumpEnv prints all environment variables (useful for debugging).
-func DumpEnv(prefixes []string) {
-	getDefault().Info("=== Environment Variables ===")
+// DumpWithPrefix prints environment variables matching prefixes.
+func DumpWithPrefix(prefixes ...string) {
+	Info("=== Environment Variables ===")
 	for _, e := range os.Environ() {
 		for _, p := range prefixes {
-			if strings.HasPrefix(e, p) {
-				getDefault().Info("  %s", e)
+			if len(p) > 0 && len(e) > len(p) && e[:len(p)] == p {
+				Info("  %s", e)
 				break
 			}
 		}
 	}
-	getDefault().Info("==============================")
-}
-
-// DumpWithPrefix prints all variables that start with given prefixes.
-func DumpWithPrefix(prefixes ...string) {
-	DumpEnv(prefixes)
+	Info("==============================")
 }
