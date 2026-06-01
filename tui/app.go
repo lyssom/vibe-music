@@ -301,7 +301,18 @@ func (m *AppModel) loadAndPlayFile(filename string) {
 		return
 	}
 	
-	code := strings.TrimSpace(string(data))
+	// Strip comments and empty lines
+	var cleanCode strings.Builder
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "//") {
+			cleanCode.WriteString(trimmed)
+			cleanCode.WriteString("\n")
+		}
+	}
+	
+	code := strings.TrimSpace(cleanCode.String())
 	if code == "" {
 		m.errorMsg = "文件为空"
 		return
