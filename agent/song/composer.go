@@ -311,50 +311,41 @@ func (c *Composer) GenerateAllSections(ctx context.Context) error {
 
 // generateTemplateDSL generates DSL code from templates (fallback when no LLM)
 func generateTemplateDSL(section Section) string {
-	// Simple template-based DSL generation
+	// Simple template-based DSL generation using valid DSL syntax
 	switch section.Type {
 	case SectionIntro:
-		return fmt.Sprintf(`@%d BPM
-
-// Intro - %d bars
-[Intro]
-D4 0.5
-G4 0.5
-A4 0.5
-|`, section.BPM, section.Bars)
+		return fmt.Sprintf(`// Intro - %d bars at %d BPM
+bass("c2", "2n", 0.7)
+chord("c3 e3 g3", "4n", 0.4).every(4)`, section.Bars, section.BPM)
 	case SectionVerse:
 		return fmt.Sprintf(`// Verse - %d bars
-[Verse]
-Am 1
-Dm 1
-G 1
-C 1
-|`, section.Bars)
+bass("c2", "2n", 0.8)
+chord("c3 e3 g3", "4n", 0.5).every(4)
+sound("hh").every(4).every(2)`, section.Bars)
+	case SectionPreChorus:
+		return fmt.Sprintf(`// Pre-Chorus - %d bars
+bass("c2", "2n", 0.85)
+chord("c3 e3 g3", "4n", 0.55).every(4)
+sound("hh").every(4).every(2)`, section.Bars)
 	case SectionChorus:
 		return fmt.Sprintf(`// Chorus - %d bars
-[Chorus]
-C 1
-G 1
-Am 1
-F 1
-|`, section.Bars)
+bass("c2", "2n", 0.9)
+chord("c3 e3 g3", "4n", 0.6).every(4)
+sound("bd sd").every(4).every(2)
+sound("hh").every(4).every(2)`, section.Bars)
 	case SectionBridge:
 		return fmt.Sprintf(`// Bridge - %d bars
-[Bridge]
-Em 1
-Hm 1
-Am 1
-G 1
-|`, section.Bars)
+bass("eb2", "2n", 0.85)
+chord("eb3 gb3 bb3", "4n", 0.5).every(4)
+sound("hh").every(4).every(3)`, section.Bars)
 	case SectionOutro:
 		return fmt.Sprintf(`// Outro - %d bars
-[Outro]
-D4 1
-G4 1
-|`, section.Bars)
+bass("c2", "2n", 0.7)
+chord("c3 e3 g3", "4n", 0.4).every(4)`, section.Bars)
 	default:
 		return fmt.Sprintf(`// Section - %d bars
-|`, section.Bars)
+bass("c2", "2n", 0.8)
+chord("c3 e3 g3", "4n", 0.5).every(4)`, section.Bars)
 	}
 }
 
