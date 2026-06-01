@@ -502,7 +502,6 @@ func (m *AppModel) processComposeInput(input string) {
 		return
 	}
 
-	// Normal flow: ProcessResponse for explore/generate phases
 	_, question, err := m.composer.ProcessResponse(ctx, input)
 	fmt.Fprintf(os.Stderr, "[DEBUG] ProcessResponse returned: question.Kind=%q, err=%v\n", question.Kind, err)
 	if err != nil {
@@ -519,6 +518,7 @@ func (m *AppModel) processComposeInput(input string) {
 	if question.Text != "" && question.Kind != "done" {
 		m.currentQuestion = question.Text
 	}
+
 
 	// Check if we should generate the song
 	// Generate if: question is done OR we're in generate phase
@@ -539,7 +539,7 @@ func (m *AppModel) processComposeInput(input string) {
 				if i > 0 {
 					allCode.WriteString("\n\n")
 				}
-				allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s", 
+				allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s",
 					section.ID, section.Bars, section.DSLCode))
 			}
 			m.codeContent = allCode.String()
@@ -547,7 +547,7 @@ func (m *AppModel) processComposeInput(input string) {
 
 		m.composeMode = false
 		m.agentStatus = "complete"
-		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n", 
+		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n",
 			m.composeMode, len(m.codeContent))
 		return
 	}
