@@ -32,6 +32,7 @@ const (
 type Section struct {
 	ID          string
 	Type        SectionType
+	Name        string // Chinese display name (e.g., "前奏", "主歌")
 	Bars        int
 	BPM         int
 	DSLCode     string

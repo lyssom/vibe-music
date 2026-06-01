@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lyssom/vibe-music/agent/generator"
+	"github.com/lyssom/vibe-music/agent/llm"
 	"github.com/lyssom/vibe-music/pkg/logger"
 )
 
@@ -93,6 +94,82 @@ func (c *Composer) ProcessResponse(ctx context.Context, response string) (*Dialo
 	}
 
 	return nil, Question{Kind: "error", Text: "Unknown phase"}, nil
+}
+
+// Chat conducts a conversation turn with LLM
+func (c *Composer) Chat(ctx context.Context, userInput string) (*llm.StructuredResponse, error) {
+	// Get conversation history
+	history := c.session.GetLLMHistory()
+
+	// Call LLM generator (c.gen.gen is the wrapped generator.Generator)
+	resp, err := c.gen.gen.GenerateWithStructuredResponse(ctx, userInput, history)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add to session history
+	c.session.AddDialogTurn("user", userInput)
+	c.session.AddLLMTurn(resp.Message)
+
+	// Handle based on action
+	switch resp.Action {
+	case llm.ActionQuestion:
+		// Just return the question
+		return resp, nil
+
+	case llm.ActionGenerate:
+		// Build song from structure
+		if err := c.buildSongFromStructure(resp); err != nil {
+			return resp, err
+		}
+		return resp, nil
+
+	case llm.ActionRefine:
+		// Handle refinement request
+		return resp, nil
+
+	case llm.ActionDone:
+		return resp, nil
+
+	default:
+		return resp, nil
+	}
+}
+
+// buildSongFromStructure creates a Song from StructuredResponse
+func (c *Composer) buildSongFromStructure(resp *llm.StructuredResponse) error {
+	if len(resp.Structure) == 0 {
+		return fmt.Errorf("no structure provided")
+	}
+
+	bpm := resp.BPM
+	if bpm == 0 {
+		bpm = 120
+	}
+
+	// Build song
+	song := &Song{
+		Title:       "Generated Song",
+		Description: resp.Notes,
+	}
+
+	for _, spec := range resp.Structure {
+		sectionType := parseSectionType(spec.ID)
+		section := Section{
+			ID:          spec.ID,
+			Type:        sectionType,
+			Description: spec.Name,
+			Bars:        spec.Bars,
+			BPM:         bpm,
+		}
+		song.Sections = append(song.Sections, section)
+	}
+
+	song.TotalBars = calculateTotalBars(song.Sections)
+	c.session.SetSong(song)
+	c.session.SetPhase(PhaseGenerate)
+
+	return nil
 }
 
 // ProcessStructureSelection handles user's structure choice
@@ -452,4 +529,33 @@ func (c *Composer) FormatSongOutput() string {
 	sb.WriteString("═══════════════════════════════════════════════════════════\n")
 
 	return sb.String()
+}
+
+// parseSectionType converts string to SectionType
+func parseSectionType(id string) SectionType {
+	switch strings.ToLower(id) {
+	case "intro", "前奏":
+		return SectionIntro
+	case "verse", "主歌":
+		return SectionVerse
+	case "pre-chorus", "prechorus", "前置副歌":
+		return SectionPreChorus
+	case "chorus", "副歌":
+		return SectionChorus
+	case "bridge", "桥段":
+		return SectionBridge
+	case "outro", "尾奏":
+		return SectionOutro
+	default:
+		return SectionVerse
+	}
+}
+
+// calculateTotalBars sums bar counts
+func calculateTotalBars(sections []Section) int {
+	total := 0
+	for _, s := range sections {
+		total += s.Bars
+	}
+	return total
 }

@@ -3,6 +3,8 @@ package song
 import (
 	"fmt"
 	"time"
+
+	"github.com/lyssom/vibe-music/agent/llm"
 )
 
 // Session manages the composition session state
@@ -64,6 +66,28 @@ func (s *Session) AddDialogTurn(role, content string) {
 	s.turnCounter++
 	s.state.History = append(s.state.History, DialogTurn{
 		Role:    role,
+		Content: content,
+		Turn:    s.turnCounter,
+	})
+}
+
+// GetLLMHistory returns messages formatted for LLM
+func (s *Session) GetLLMHistory() []llm.Message {
+	var history []llm.Message
+	for _, turn := range s.state.History {
+		history = append(history, llm.Message{
+			Role:    turn.Role,
+			Content: turn.Content,
+		})
+	}
+	return history
+}
+
+// AddLLMTurn adds an assistant response turn
+func (s *Session) AddLLMTurn(content string) {
+	s.turnCounter++
+	s.state.History = append(s.state.History, DialogTurn{
+		Role:    "assistant",
 		Content: content,
 		Turn:    s.turnCounter,
 	})

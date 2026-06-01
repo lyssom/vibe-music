@@ -24,4 +24,7 @@ type Generator interface {
 
 	// GenerateStream streams generated pattern code token by token.
 	GenerateStream(ctx context.Context, prompt string, pctx PromptContext) (<-chan llm.StreamEvent, error)
+
+	// GenerateWithStructuredResponse returns structured response for conversation flow
+	GenerateWithStructuredResponse(ctx context.Context, prompt string, history []llm.Message) (*llm.StructuredResponse, error)
 }

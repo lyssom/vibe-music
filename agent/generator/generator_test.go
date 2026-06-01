@@ -23,6 +23,15 @@ func (m *mockGenerator) GenerateStream(_ context.Context, _ string, _ generator.
 	return ch, nil
 }
 
+func (m *mockGenerator) GenerateWithStructuredResponse(_ context.Context, _ string, _ []llm.Message) (*llm.StructuredResponse, error) {
+	return &llm.StructuredResponse{
+		Type:    llm.ActionGenerate,
+		Action:  llm.ActionGenerate,
+		Message: "Generated beat",
+		BPM:     120,
+	}, nil
+}
+
 var _ generator.Generator = (*mockGenerator)(nil)
 
 func TestGeneratorProducesCode(t *testing.T) {

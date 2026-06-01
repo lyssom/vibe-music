@@ -1,29 +1,21 @@
 package song
 
-// Action types for LLM responses
-const (
-	ActionQuestion = "question"
-	ActionGenerate = "generate"
-	ActionDone     = "done"
-	ActionRefine   = "refine"
-)
+import "github.com/lyssom/vibe-music/agent/llm"
 
-// StructuredResponse represents LLM's structured response
-type StructuredResponse struct {
-	Type    string   `json:"type"`              // "question" | "generate" | "done" | "refine"
-	Action  string   `json:"action"`            // Same as Type for compatibility
-	Message string   `json:"message"`           // Human-readable message
-	Options []string `json:"options,omitempty"` // Question options (action=question)
+// Deprecated: Use llm.StructuredResponse instead. This alias is kept for backwards compatibility.
+type StructuredResponse = llm.StructuredResponse
 
-	// Generate parameters (action=generate or refine)
-	Structure []SectionSpec `json:"structure,omitempty"`
-	BPM       int           `json:"bpm,omitempty"`
-	Notes     string        `json:"notes,omitempty"`
-}
+// Deprecated: Use llm.SectionSpec instead. This alias is kept for backwards compatibility.
+type SectionSpec = llm.SectionSpec
 
-// SectionSpec defines a section for generation
-type SectionSpec struct {
-	ID    string `json:"id"`    // "intro", "verse", "chorus", etc.
-	Name  string `json:"name"`  // Chinese name: "前奏", "主歌", etc.
-	Bars  int    `json:"bars"`  // Number of bars
-}
+// Deprecated: Use llm.ActionQuestion instead.
+const ActionQuestion = llm.ActionQuestion
+
+// Deprecated: Use llm.ActionGenerate instead.
+const ActionGenerate = llm.ActionGenerate
+
+// Deprecated: Use llm.ActionDone instead.
+const ActionDone = llm.ActionDone
+
+// Deprecated: Use llm.ActionRefine instead.
+const ActionRefine = llm.ActionRefine

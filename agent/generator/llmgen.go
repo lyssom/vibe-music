@@ -2,6 +2,7 @@ package generator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -63,6 +64,39 @@ sound("sd").every(4).every(2)
 - Keep patterns concise. For long patterns, use multiple sound() commands with .every().
 - You may chain: sound("bd sd").every(2) — fires every 2nd beat.
 - note/chord/bass take standard note notation: c3, eb4, #f5, gb5, a3, etc.`
+
+const structuredSystemPrompt = `You are Vibe Echo's AI music composer. Users create music through a DSL language.
+
+Your role:
+1. Understand user's music needs (style, emotion, rhythm, instruments)
+2. Ask clarifying questions if info insufficient
+3. Generate song structure and DSL code when ready
+
+Output format - ALWAYS use JSON in a code block, followed by natural language:
+` + "`" + `json
+{"type": "question", "message": "...", "options": ["A", "B", "C"]}
+` + "`" + `
+After JSON, respond naturally in the user's language.
+
+Response types:
+- question: Need more info, return message + options
+- generate: Ready to create, return structure + bpm + notes
+- done: Composition complete
+- refine: Request to modify a section
+
+Song structure guidelines:
+- intro: 2-8 bars
+- verse: 8-16 bars
+- pre-chorus: 4-8 bars
+- chorus: 8-16 bars
+- bridge: 4-8 bars
+- outro: 2-8 bars
+
+Common song structures:
+- Simple pop: intro(4) → verse(8) → chorus(8) → verse(8) → chorus(8) → outro(4)
+- Standard: intro(4) → verse(8) → pre-chorus(4) → chorus(8) → bridge(4) → chorus(8) → outro(4)
+
+Users can describe needs in Chinese or English.`
 
 // NewLLMGenerator creates a generator backed by an LLM client.
 func NewLLMGenerator(client llm.Client) *LLMGenerator {
@@ -174,6 +208,90 @@ func StripThinking(text string) string {
 		}
 	}
 	return strings.TrimSpace(text)
+}
+
+// ParseStructuredResponse extracts JSON from LLM response
+func ParseStructuredResponse(text string) (*llm.StructuredResponse, error) {
+	// Find JSON in ```json ... ``` or ``` ... ```
+	start := strings.Index(text, "```json")
+	if start == -1 {
+		start = strings.Index(text, "```")
+	}
+	if start == -1 {
+		return nil, fmt.Errorf("no json block found")
+	}
+
+	// Skip the opening fence
+	if strings.HasPrefix(text[start:], "```json") {
+		start += 7
+	} else {
+		start += 3
+	}
+
+	// Find closing fence
+	end := strings.Index(text[start:], "```")
+	if end == -1 {
+		return nil, fmt.Errorf("no closing fence")
+	}
+
+	jsonStr := strings.TrimSpace(text[start : start+end])
+
+	var resp llm.StructuredResponse
+	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
+		return nil, fmt.Errorf("json parse error: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// GenerateWithStructuredResponse handles conversation flow
+func (g *LLMGenerator) GenerateWithStructuredResponse(ctx context.Context, prompt string, history []llm.Message) (*llm.StructuredResponse, error) {
+	role := func(r string) string {
+		if g.noSystem && r == "system" {
+			return "user"
+		}
+		return r
+	}
+
+	messages := []llm.Message{
+		{Role: role("system"), Content: structuredSystemPrompt},
+	}
+
+	// Add conversation history (last 20 turns)
+	start := 0
+	if len(history) > 20 {
+		start = len(history) - 20
+	}
+	messages = append(messages, history[start:]...)
+
+	// Add current prompt if non-empty
+	if prompt != "" {
+		messages = append(messages, llm.Message{Role: "user", Content: prompt})
+	}
+
+	result, err := g.client.Chat(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("chat error: %w", err)
+	}
+
+	// Parse the structured response
+	resp, err := ParseStructuredResponse(result)
+	if err != nil {
+		// Try to build a fallback response
+		resp = &llm.StructuredResponse{
+			Type:    llm.ActionQuestion,
+			Action:  llm.ActionQuestion,
+			Message: result, // Use raw response as message
+		}
+	}
+
+	// Update history
+	g.history = append(g.history,
+		llm.Message{Role: "user", Content: prompt},
+		llm.Message{Role: "assistant", Content: result},
+	)
+
+	return resp, nil
 }
 
 // ClearHistory resets the conversation history.

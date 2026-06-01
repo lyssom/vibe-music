@@ -16,7 +16,6 @@ import (
 	"github.com/lyssom/vibe-music/core/audio"
 	"github.com/lyssom/vibe-music/core/pattern"
 	"github.com/lyssom/vibe-music/core/playback"
-	"github.com/lyssom/vibe-music/pkg/logger"
 )
 
 type AppModel struct {
@@ -527,17 +526,13 @@ func (m *AppModel) startComposeModeWithPrompt(prompt string) {
 
 // processComposeInput handles user input in composition mode
 func (m *AppModel) processComposeInput(input string) {
-	fmt.Fprintf(os.Stderr, "[DEBUG] processComposeInput called: input=%q, composeMode=%v\n", input, m.composeMode)
-	
 	// Check for command shortcuts
 	inputLower := strings.ToLower(input)
 	if inputLower == "/quit" {
-		fmt.Fprintf(os.Stderr, "[DEBUG] Quit command detected\n")
 		m.exitComposeMode()
 		return
 	}
 	if inputLower == "/back" {
-		fmt.Fprintf(os.Stderr, "[DEBUG] Back command detected\n")
 		if m.composer != nil {
 			if err := m.composer.Rollback(); err != nil {
 				m.errorMsg = err.Error()
@@ -547,84 +542,30 @@ func (m *AppModel) processComposeInput(input string) {
 	}
 
 	ctx := context.Background()
-	phase := m.composer.GetSessionState().CurrentPhase
-	fmt.Fprintf(os.Stderr, "[DEBUG] Current phase: %v\n", phase)
-	
-	// Handle structure selection separately - don't call ProcessResponse
-	if phase == song.PhaseStructure {
-		if input == "1" || input == "2" || input == "3" {
-			var idx int
-			fmt.Sscanf(input, "%d", &idx)
-			fmt.Fprintf(os.Stderr, "[DEBUG] Structure selection: index=%d\n", idx-1)
-			if err := m.composer.ProcessStructureSelection(idx - 1); err != nil {
-				m.errorMsg = err.Error()
-				return
-			}
-		} else {
-			// Custom structure - index -1 means use custom structure from elements
-			fmt.Fprintf(os.Stderr, "[DEBUG] Custom structure: %s\n", input)
-			if err := m.composer.ProcessStructureSelection(-1); err != nil {
-				m.errorMsg = err.Error()
-				return
-			}
-		}
-		// After selection, directly trigger generation (don't call ProcessResponse)
-		fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation after structure selection\n")
-		m.agentStatus = "generating"
-		if err := m.composer.GenerateAllSections(ctx); err != nil {
-			m.errorMsg = err.Error()
-			return
-		}
-		// Combine all section codes
-		s := m.composer.GetSong()
-		if s != nil && len(s.Sections) > 0 {
-			var allCode strings.Builder
-			for i, section := range s.Sections {
-				if i > 0 {
-					allCode.WriteString("\n\n")
-				}
-				allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s",
-					section.ID, section.Bars, section.DSLCode))
-			}
-			m.codeContent = allCode.String()
-		}
-		m.composeMode = false
-		m.agentStatus = "complete"
-		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n",
-			m.composeMode, len(m.codeContent))
-		return
-	}
 
-	_, question, err := m.composer.ProcessResponse(ctx, input)
-	fmt.Fprintf(os.Stderr, "[DEBUG] ProcessResponse returned: question.Kind=%q, err=%v\n", question.Kind, err)
+	// Use new Chat method for LLM-driven flow
+	resp, err := m.composer.Chat(ctx, input)
 	if err != nil {
-		logger.Error("[TUI] ProcessResponse error: %v", err)
 		m.errorMsg = err.Error()
 		return
 	}
 
-	// Get current phase AFTER ProcessResponse
-	currentPhase := m.composer.GetSessionState().CurrentPhase
-	fmt.Fprintf(os.Stderr, "[DEBUG] Current phase after ProcessResponse: %v\n", currentPhase)
+	// Store AI message for display
+	m.currentQuestion = resp.Message
 
-	// Store the AI's next question
-	if question.Text != "" && question.Kind != "done" {
-		m.currentQuestion = question.Text
-	}
+	switch resp.Action {
+	case song.ActionQuestion:
+		// Display question and wait for response
+		m.agentStatus = "composing"
 
-
-	// Check if we should generate the song
-	// Generate if: question is done OR we're in generate phase
-	if question.Kind == "done" || question.Kind == "generating" || currentPhase == song.PhaseGenerate {
-		fmt.Fprintf(os.Stderr, "[DEBUG] Triggering generation\n")
-		// Generate the DSL code for all sections
+	case song.ActionGenerate:
+		// Generate all sections
 		m.agentStatus = "generating"
 		if err := m.composer.GenerateAllSections(ctx); err != nil {
 			m.errorMsg = err.Error()
 			return
 		}
-
-		// Combine all section codes
+		// Combine section codes
 		s := m.composer.GetSong()
 		if s != nil && len(s.Sections) > 0 {
 			var allCode strings.Builder
@@ -637,15 +578,13 @@ func (m *AppModel) processComposeInput(input string) {
 			}
 			m.codeContent = allCode.String()
 		}
-
 		m.composeMode = false
 		m.agentStatus = "complete"
-		fmt.Fprintf(os.Stderr, "[DEBUG] Generation complete, composeMode=%v, codeContent len=%d\n",
-			m.composeMode, len(m.codeContent))
-		return
-	}
 
-	m.agentStatus = "composing"
+	case song.ActionDone:
+		m.composeMode = false
+		m.agentStatus = "complete"
+	}
 }
 
 // exitComposeMode exits composition mode
