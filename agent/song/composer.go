@@ -83,7 +83,13 @@ func (c *Composer) ProcessResponse(ctx context.Context, response string) (*Dialo
 
 // ProcessStructureSelection handles user's structure choice
 func (c *Composer) ProcessStructureSelection(index int) error {
-	return c.structurer.SelectStructure(index)
+	err := c.structurer.SelectStructure(index)
+	if err != nil {
+		return err
+	}
+	// Transition to generate phase
+	c.session.SetPhase(PhaseGenerate)
+	return nil
 }
 
 // parseAndSetElement extracts and sets element from response

@@ -34,6 +34,8 @@ type AppModel struct {
 	// new fields for composition mode
 	composer    *song.Composer
 	composeMode bool
+	// Track pending AI response for multi-round conversation
+	currentQuestion string
 }
 
 const (
@@ -76,6 +78,9 @@ var (
 		lipgloss.Color("220"), // gold
 		lipgloss.Color("81"),  // teal
 	}
+
+	// Keywords that trigger multi-round song composition mode
+	songKeywords = []string{"歌曲", "写歌", "主歌", "副歌", "桥段", "bridge", "verse", "chorus", "完整", "完整歌曲", "jazz", "爵士", "pop", "流行", "rock", "摇滚"}
 )
 
 type agentResultMsg struct{ response string; err error }
@@ -109,6 +114,17 @@ func tickCmd() tea.Cmd {
 
 type tickMsg struct{}
 
+// shouldStartComposeMode checks if input indicates user wants multi-round song composition
+func shouldStartComposeMode(input string) bool {
+	inputLower := strings.ToLower(input)
+	for _, keyword := range songKeywords {
+		if strings.Contains(inputLower, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -125,23 +141,44 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			if m.playing { m.playback.Stop() }
 			return m, tea.Quit
-		case "/compose", "ctrl+/":
+		case "ctrl+/":
 			m.startComposeMode()
 		case " ":
 			m.togglePlay()
 		case "ctrl+r":
 			m.runCode()
 		case "enter":
-			if input := strings.TrimSpace(m.editor.Value()); input != "" {
-				if m.composeMode {
-					m.processComposeInput(input)
-					m.editor.SetValue("")
-				} else {
-					_, cmd := m.runAgent(input)
-					m.editor.SetValue("")
-					return m, cmd
-				}
+			input := strings.TrimSpace(m.editor.Value())
+			if input == "" {
+				return m, nil
 			}
+
+			// Handle explicit commands
+			if strings.HasPrefix(input, "/") {
+				m.handleCommand(input)
+				m.editor.SetValue("")
+				return m, nil
+			}
+
+			// Auto-detect song composition mode based on keywords
+			if shouldStartComposeMode(input) {
+				m.startComposeModeWithPrompt(input)
+				m.editor.SetValue("")
+				return m, nil
+			}
+
+			// Process input based on current mode
+			if m.composeMode {
+				m.processComposeInput(input)
+				m.editor.SetValue("")
+				return m, nil
+			}
+
+			// Normal single-shot generation
+			_, cmd := m.runAgent(input)
+			m.editor.SetValue("")
+			return m, cmd
+
 		case "ctrl+d":
 			m.editor.SetValue("")
 		default:
@@ -167,6 +204,25 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	cmds = append(cmds, tickCmd())
 	return m, tea.Batch(cmds...)
+}
+
+// handleCommand processes slash commands
+func (m *AppModel) handleCommand(cmd string) {
+	switch strings.ToLower(cmd) {
+	case "/compose":
+		m.startComposeMode()
+	case "/quit", "/exit":
+		m.exitComposeMode()
+	case "/back":
+		if m.composer != nil {
+			if err := m.composer.Rollback(); err != nil {
+				m.errorMsg = err.Error()
+			}
+		}
+	case "/help":
+		m.agentStatus = "help"
+		m.errorMsg = "/compose - 开启多轮歌曲创作  /quit - 退出创作  /back - 回退一步"
+	}
 }
 
 func (m *AppModel) togglePlay() {
@@ -308,11 +364,14 @@ func (m AppModel) renderStatusLine(w int) string {
 	case "paused": statusStr = orange.Render("PAUSED")
 	case "thinking": statusStr = pink.Render("THINKING")
 	case "no key": statusStr = danger.Render("NO KEY")
+	case "composing": statusStr = cyan.Render("COMPOSING")
+	case "complete": statusStr = accent.Render("COMPLETE")
+	case "help": statusStr = muted.Render(m.errorMsg)
 	default: statusStr = muted.Render("STANDBY")
 	}
 
 	left := play + " " + statusStr
-	if m.errorMsg != "" {
+	if m.errorMsg != "" && m.agentStatus != "help" {
 		left += " " + danger.Render(m.errorMsg)
 	}
 
@@ -330,8 +389,28 @@ func (m *AppModel) startComposeMode() {
 	m.composer = song.NewComposer(m.generator)
 	m.composeMode = true
 	question := m.composer.StartSession("")
-	// question is displayed in renderComposeView via GetDialogHistory
-	_ = question // consumed by StartSession
+	m.currentQuestion = question.Text
+	m.agentStatus = "composing"
+}
+
+// startComposeModeWithPrompt starts composition with user's initial prompt
+func (m *AppModel) startComposeModeWithPrompt(prompt string) {
+	if m.generator == nil {
+		m.agentStatus = "no key"
+		return
+	}
+	m.composer = song.NewComposer(m.generator)
+	m.composeMode = true
+	
+	// Start session with the user's initial prompt
+	question := m.composer.StartSession(prompt)
+	
+	// Store the AI's first question
+	m.currentQuestion = question.Text
+	
+	// Add AI's question to display
+	_ = question
+	
 	m.agentStatus = "composing"
 }
 
@@ -339,13 +418,15 @@ func (m *AppModel) startComposeMode() {
 func (m *AppModel) processComposeInput(input string) {
 	// Check for command shortcuts
 	inputLower := strings.ToLower(input)
-	if inputLower == "/quit" || inputLower == "/done" {
+	if inputLower == "/quit" {
 		m.exitComposeMode()
 		return
 	}
 	if inputLower == "/back" {
-		if err := m.composer.Rollback(); err != nil {
-			m.errorMsg = err.Error()
+		if m.composer != nil {
+			if err := m.composer.Rollback(); err != nil {
+				m.errorMsg = err.Error()
+			}
 		}
 		return
 	}
@@ -359,38 +440,40 @@ func (m *AppModel) processComposeInput(input string) {
 			if err := m.composer.ProcessStructureSelection(idx - 1); err != nil {
 				m.errorMsg = err.Error()
 			}
-			// Continue to handle generation phase
 		}
 	}
 
 	ctx := context.Background()
-	turn, question, err := m.composer.ProcessResponse(ctx, input)
+	_, question, err := m.composer.ProcessResponse(ctx, input)
 	if err != nil {
 		m.errorMsg = err.Error()
 		return
 	}
 
-	// Add assistant turn to history
-	_ = turn // consumed by ProcessResponse
+	// Store the AI's next question
+	if question.Text != "" && question.Kind != "done" {
+		m.currentQuestion = question.Text
+	}
 
+	// Check if we should generate the song
 	if question.Kind == "done" || phase == song.PhaseGenerate {
-		// Now generate the DSL code for all sections
+		// Generate the DSL code for all sections
 		m.agentStatus = "generating"
 		if err := m.composer.GenerateAllSections(ctx); err != nil {
 			m.errorMsg = err.Error()
 			return
 		}
 
-		// Copy first section DSL to code content
-		song := m.composer.GetSong()
-		if song != nil && len(song.Sections) > 0 {
-			// Combine all section codes
+		// Combine all section codes
+		s := m.composer.GetSong()
+		if s != nil && len(s.Sections) > 0 {
 			var allCode strings.Builder
-			for i, section := range song.Sections {
+			for i, section := range s.Sections {
 				if i > 0 {
 					allCode.WriteString("\n\n")
 				}
-				allCode.WriteString(fmt.Sprintf("// === %s ===\n%s", section.ID, section.DSLCode))
+				allCode.WriteString(fmt.Sprintf("// === %s (%d bars) ===\n%s", 
+					section.ID, section.Bars, section.DSLCode))
 			}
 			m.codeContent = allCode.String()
 		}
@@ -407,64 +490,81 @@ func (m *AppModel) processComposeInput(input string) {
 func (m *AppModel) exitComposeMode() {
 	m.composeMode = false
 	m.composer = nil
+	m.currentQuestion = ""
 	m.agentStatus = "standby"
 }
 
-// renderComposeView renders the composition mode UI
+// renderComposeView renders the composition mode UI with multi-round conversation
 func (m AppModel) renderComposeView() string {
 	w := max(m.width, 40)
 	h := max(m.height, 8)
 
 	var b strings.Builder
 
-	// Header
+	// Header with mode indicator
 	b.WriteString(pink.Render("▓ SONG COMPOSER ▓"))
-	b.WriteString(" " + cyan.Render("多轮创作模式"))
+	b.WriteString(" " + cyan.Render("多轮头脑风暴"))
 	b.WriteString("\n")
 	b.WriteString(codeBorder.Render(strings.Repeat("─", w)))
 	b.WriteString("\n\n")
 
-	// Dialog history
+	// Display conversation history in a scrollable area
 	history := m.composer.GetDialogHistory()
-	contentLines := h - 8
+	contentLines := h - 10
 	if contentLines < 4 {
 		contentLines = 4
 	}
 
-	// Build content area
-	var content strings.Builder
-	for _, turn := range history {
+	// Build conversation display
+	var conv strings.Builder
+	
+	// Show last few turns
+	startIdx := 0
+	if len(history) > contentLines/2 {
+		startIdx = len(history) - contentLines/2
+	}
+	
+	for i := startIdx; i < len(history); i++ {
+		turn := history[i]
 		if turn.Role == "user" {
-			content.WriteString(muted.Render("你: "))
-			content.WriteString(turn.Content)
+			conv.WriteString(bright.Render("你: "))
+			conv.WriteString(turn.Content)
 		} else {
-			content.WriteString(accent.Render("AI: "))
-			content.WriteString(turn.Content)
+			// AI response - may contain question
+			conv.WriteString(accent.Render("AI: "))
+			conv.WriteString(turn.Content)
 		}
-		content.WriteString("\n\n")
+		conv.WriteString("\n\n")
+	}
+	
+	b.WriteString(conv.String())
+
+	// Show current question prominently if in explore mode
+	phase := m.composer.GetSessionState().CurrentPhase
+	if phase == song.PhaseExplore || phase == song.PhaseStructure {
+		if m.currentQuestion != "" {
+			b.WriteString("\n")
+			b.WriteString(cyan.Render("📋 ") + bright.Render("请回答:"))
+			b.WriteString("\n")
+			b.WriteString(accent.Render(m.currentQuestion))
+			b.WriteString("\n")
+		}
 	}
 
-	// Truncate if too long
-	contentStr := content.String()
-	lines := strings.Split(contentStr, "\n")
-	if len(lines) > contentLines {
-		lines = lines[len(lines)-contentLines:]
-		contentStr = strings.Join(lines, "\n")
-		content.Reset()
-		content.WriteString(muted.Render("...\n\n"))
-		content.WriteString(contentStr)
+	// Show progress info
+	b.WriteString("\n")
+	elements := m.composer.GetSessionState().Elements
+	if elements.Genre != "" {
+		b.WriteString(muted.Render(fmt.Sprintf("已确定: %s", elements.Genre)))
 	}
-	b.WriteString(content.String())
-
-	// Duration estimate
-	b.WriteString(muted.Render(fmt.Sprintf("总时长: %s", m.composer.GetDurationEstimate())))
+	b.WriteString(muted.Render(fmt.Sprintf("  预计时长: %s", m.composer.GetDurationEstimate())))
 	b.WriteString("\n\n")
 
 	// Input area
 	b.WriteString(inputBox.Render(m.editor.View()))
 	b.WriteString("\n")
 
-	// Status bar
+	// Status bar with help
 	b.WriteString(m.renderComposeStatusLine())
 
 	return b.String()
@@ -472,8 +572,21 @@ func (m AppModel) renderComposeView() string {
 
 // renderComposeStatusLine renders the status line for compose mode
 func (m AppModel) renderComposeStatusLine() string {
-	left := accent.Render("COMPOSING")
-	right := muted.Render("/done 完成  ·  /back 回退  ·  /quit 退出")
+	phase := m.composer.GetSessionState().CurrentPhase
+	var phaseName string
+	switch phase {
+	case song.PhaseExplore:
+		phaseName = "探索要素"
+	case song.PhaseStructure:
+		phaseName = "选择结构"
+	case song.PhaseGenerate:
+		phaseName = "生成中"
+	default:
+		phaseName = "创作中"
+	}
+	
+	left := accent.Render(phaseName)
+	right := muted.Render("/quit 退出  ·  /back 回退")
 	pad := max(0, m.width-len(left)-len(right))
 	return left + strings.Repeat(" ", pad) + right
 }
