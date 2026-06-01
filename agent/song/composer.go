@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lyssom/vibe-music/agent/generator"
+	"github.com/lyssom/vibe-music/pkg/logger"
 )
 
 // Composer orchestrates the entire composition flow
@@ -48,25 +49,38 @@ func (c *Composer) StartSession(initialPrompt string) Question {
 
 // ProcessResponse handles user response to a question
 func (c *Composer) ProcessResponse(ctx context.Context, response string) (*DialogTurn, Question, error) {
+	logger.Debug("[Composer] ProcessResponse: response=%q", response)
+	
 	c.session.AddDialogTurn("user", response)
 
-	// Parse response and update elements
-	c.parseAndSetElement(response)
+	// Get the current question BEFORE parsing
+	historyLen := len(c.session.GetState().History) - 1 // -1 because we just added user turn
+	currentQuestion := c.explorer.NextQuestion(historyLen)
+	
+	// Parse response and update elements using the current question
+	c.parseAndSetElement(response, currentQuestion)
+
+	elements := c.session.GetElements()
+	logger.Debug("[Composer] After parseAndSetElement: Genre=%q, Emotion=%q, Rhythm=%q", 
+		elements.Genre, elements.Emotion, elements.Rhythm)
 
 	// Save checkpoint
 	c.session.SaveHistoryNode()
 
 	phase := c.session.GetState().CurrentPhase
+	logger.Debug("[Composer] Current phase: %v", phase)
 
 	switch phase {
 	case PhaseExplore:
 		if c.explorer.IsComplete() {
+			logger.Debug("[Composer] Exploration complete, transitioning to PhaseStructure")
 			c.session.SetPhase(PhaseStructure)
 			return c.handleStructurePhase()
 		}
-		turn := len(c.session.GetState().History)
-		question := c.explorer.NextQuestion(turn)
-		return c.buildAssistantTurn(question), question, nil
+		// Get NEXT question using updated history length
+		nextQuestion := c.explorer.NextQuestion(len(c.session.GetState().History))
+		logger.Debug("[Composer] Next question: kind=%q", nextQuestion.Kind)
+		return c.buildAssistantTurn(nextQuestion), nextQuestion, nil
 
 	case PhaseStructure:
 		return c.handleStructurePhase()
@@ -93,51 +107,54 @@ func (c *Composer) ProcessStructureSelection(index int) error {
 }
 
 // parseAndSetElement extracts and sets element from response
-func (c *Composer) parseAndSetElement(response string) {
+func (c *Composer) parseAndSetElement(response string, currentQuestion Question) {
 	responseLower := strings.ToLower(response)
-	state := c.session.GetState()
-	question := c.explorer.NextQuestion(len(state.History))
-	kind := question.Kind
+	kind := currentQuestion.Kind
 
 	if kind == "done" {
 		return
 	}
 
 	// Try to match options first
-	for _, opt := range question.Options {
+	matched := false
+	for _, opt := range currentQuestion.Options {
 		optLower := strings.ToLower(opt)
-		
-		// Check if response matches the option (either full match or partial)
+
 		// Strategy 1: exact match after lowercase
 		if responseLower == optLower {
 			c.session.SetElement(kind, opt)
-			return
+			matched = true
+			break
 		}
-		
-		// Strategy 2: response contains the option (for "爵士" matching "爵士 Jazz")
-		// Extract the Chinese or first part of the option
+
+		// Strategy 2: extract Chinese part for "爵士 Jazz" format
 		if strings.Contains(optLower, " ") {
-			// Option has format "中文 English", extract Chinese part
 			chinesePart := strings.SplitN(optLower, " ", 2)[0]
 			if responseLower == chinesePart || strings.Contains(responseLower, chinesePart) {
 				c.session.SetElement(kind, opt)
-				return
+				matched = true
+				break
 			}
 		}
-		
+
 		// Strategy 3: option contains response
-		if strings.Contains(optLower, responseLower) {
+		if strings.Contains(optLower, responseLower) && responseLower != "" {
 			c.session.SetElement(kind, opt)
-			return
+			matched = true
+			break
 		}
 	}
 
-	// Use response as direct value
-	c.session.SetElement(kind, response)
+	// Fallback: use response as direct value
+	if !matched {
+		c.session.SetElement(kind, response)
+	}
 }
 
 // handleStructurePhase handles structure negotiation
 func (c *Composer) handleStructurePhase() (*DialogTurn, Question, error) {
+	logger.Info("[Composer] handleStructurePhase called")
+	
 	proposals := c.structurer.ProposeStructures(3)
 	c.session.SetProposedStructures(proposals)
 
@@ -151,7 +168,7 @@ func (c *Composer) handleStructurePhase() (*DialogTurn, Question, error) {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("请选择结构编号，或告诉我你的自定义结构。")
+	sb.WriteString("请选择结构编号（输入 1、2 或 3），或告诉我你的自定义结构。")
 
 	question := Question{
 		Kind:    "structure",
@@ -159,6 +176,7 @@ func (c *Composer) handleStructurePhase() (*DialogTurn, Question, error) {
 		Options: []string{"1", "2", "3"},
 	}
 
+	logger.Info("[Composer] handleStructurePhase returning structure question with %d proposals", len(proposals))
 	return c.buildAssistantTurn(question), question, nil
 }
 

@@ -1,6 +1,10 @@
 package song
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/lyssom/vibe-music/pkg/logger"
+)
 
 // Explorer manages the ten elements exploration flow
 type Explorer struct {
@@ -53,12 +57,16 @@ func (e *Explorer) determinePriority(turn int) []string {
 
 // NextQuestion generates the next question based on turn
 func (e *Explorer) NextQuestion(turn int) Question {
+	logger.Debug("[Explorer] NextQuestion called, turn=%d", turn)
+	
 	priorities := e.determinePriority(turn)
 	if len(priorities) == 0 {
+		logger.Debug("[Explorer] No priorities, returning done")
 		return Question{Kind: "done", Text: "我已经了解了你需要的音乐要素。"}
 	}
 
 	kind := priorities[0]
+	logger.Debug("[Explorer] Selected priority kind: %s", kind)
 
 	switch kind {
 	case "genre":
@@ -153,10 +161,17 @@ func DetermineMode(initialPrompt string) InteractionMode {
 		return ModeSimple
 	}
 
-	// Full patterns (song-related keywords)
+	// Full patterns (song-related keywords in both English and Chinese)
 	if strings.Contains(initialPrompt, "song") || strings.Contains(initialPrompt, "主歌") ||
 		strings.Contains(initialPrompt, "副歌") || strings.Contains(initialPrompt, "桥段") ||
-		strings.Contains(initialPrompt, "album") || strings.Contains(initialPrompt, "track") {
+		strings.Contains(initialPrompt, "album") || strings.Contains(initialPrompt, "track") ||
+		strings.Contains(initialPrompt, "歌曲") || strings.Contains(initialPrompt, "写歌") ||
+		strings.Contains(initialPrompt, "作曲") || strings.Contains(initialPrompt, "完整") ||
+		strings.Contains(initialPrompt, "verse") || strings.Contains(initialPrompt, "chorus") ||
+		strings.Contains(initialPrompt, "bridge") || strings.Contains(initialPrompt, "jazz") ||
+		strings.Contains(initialPrompt, "爵士") || strings.Contains(initialPrompt, "流行") ||
+		strings.Contains(initialPrompt, "pop") || strings.Contains(initialPrompt, "rock") ||
+		strings.Contains(initialPrompt, "摇滚") {
 		return ModeFull
 	}
 
